@@ -28,12 +28,12 @@ def handle_retrain():
 		refresh, force = False, False
 
 		if request.args.get('refresh_dataset'):
-
 			refresh = bool(request.args.get('refresh_dataset'))
+
 		if request.args.get('force'):
 			force = bool(request.args.get('force'))
 
-		#retraining model
+		#retrain model
 		is_retrain = service.retrain_model(num_topics, refresh, force)
 
 		resp_data['status'] = 'success' if is_retrain else 'error'

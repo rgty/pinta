@@ -132,8 +132,6 @@ def compute_similarity(num_topics=50):
 	df.to_pickle(recommend_file)
 
 def get_similar_articles(_id):
-	
-	logger.info("fetching similar articles..")
 
 	resp_list, resp_dict = [], {}
 
@@ -146,23 +144,24 @@ def get_similar_articles(_id):
 			
 			_source, _target = {}, []
 			_source['_id'] = df['_source']['_id']
-			_source['_title'] = df['_source']['_title']
+			_source['title'] = df['_source']['_title']
 			
 			for i in range(len(df['_target'])):
 				_dict = {}
 				_dict['_id'] = df['_target'][i]['_id']
-				_dict['_title'] = df['_target'][i]['_title']
-				_dict['_score'] = df['_target'][i]['_score']	
+				_dict['title'] = df['_target'][i]['_title']
+				_dict['score'] = df['_target'][i]['_score']	
 				_target.append(_dict)
 			
-			resp_dict['_source'] = _source
-			resp_dict['_target'] = _target
+			resp_dict['source'] = _source
+			resp_dict['recommends'] = _target
+
+			logger.debug(str(resp_dict))
 
 		except Exception as e:
 			print(str(e))
 
-		logger.debug(str(resp_dict))
-		logger.info('success' if len(resp_dict) != 0 else 'error')
+		logger.info("fetching similar articles..%s", len(resp_dict) != 0)
 	
 	return resp_dict
 
