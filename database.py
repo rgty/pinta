@@ -1,5 +1,7 @@
 import pymysql
 import parseconfig as config
+import logging
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 def get_connection():
 	try:
