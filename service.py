@@ -1,10 +1,19 @@
 import dao, json, re, spacy, os
 import pandas as pd
 from gensim import corpora, models, similarities
-import sys
+import sys, subprocess, gc
 
 import logging
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+actual_file = 'actual_content.csv'
+clean_file = 'clean_content.csv'
+recommend_file = 'recommend.p'
+dict_file = 'dictionary.dict'
+corpus_file = 'corpus.mm'
+corpus_index_file = 'corpus.mm.index'
+index_file = 'matrix_similarity.index'
 
 def fetch_and_parse():
 	return lemmatize(clean(dao.get_dataset()))
@@ -30,7 +39,9 @@ def clean(d_set):
 
 		# save actual article content
 		df = pd.DataFrame(actual_set)
-		df.to_csv('actual_content.csv')
+		df.to_csv(actual_file)
+
+	logger.info("cleansing..%s", (len(parsed_dict) != 0))
 
 	return parsed_dict
 
@@ -48,18 +59,20 @@ def lemmatize(d_set):
 	df = pd.DataFrame(n_set)
 	df['_text'] = df['_text'].str.replace(r'.+(news)', '')
 	df = df.dropna(subset=['_id','_text'], axis=0, how='any')
-	df.to_csv('clean_content.csv')
+	df.to_csv(clean_file)
+
+	logger.info("lemmatizing..%s", (len(df) != 0))
 
 	return d_set
 
-def compute_similarity():
+def compute_similarity(num_topics=50):
+
+	logger.info("computing similarity with %s topics", num_topics)
 	
-	dictionary, dict_file = None, 'dictionary.dict'
-	corpus, corpus_file = None, 'corpus.mm'
-	index, index_file = None, 'matrix_similarity.index'
+	dictionary, corpus, index = None, None, None
 	documents, texts, recommends, titles = [], [], [], []
 
-	aframe = pd.read_csv('actual_content.csv')
+	aframe = pd.read_csv(actual_file)
 	aframe = aframe.dropna(subset=['_id','_text'], axis=0, how='any')
 	af_list = aframe.reset_index(drop=True).values.tolist()
 	
@@ -67,12 +80,12 @@ def compute_similarity():
 		documents.append(af_list[i][2])
 		titles.append(af_list[i][3])
 
-	cframe = pd.read_csv('clean_content.csv')
+	cframe = pd.read_csv(clean_file)
 	cframe = cframe.dropna(subset=['_id','_text'], axis=0, how='any')
 	tf_list = cframe.reset_index(drop=True).values.tolist()
 	
 	for i in range(len(tf_list)):
-		texts.append(tf_list[i][2].split())
+		texts.append(tf_list[i][2].replace(r'[^\W]+', '').split())
 
 	if not os.path.exists(dict_file):
 		dictionary = corpora.Dictionary(texts)
@@ -89,19 +102,16 @@ def compute_similarity():
 	tfidf = models.TfidfModel(corpus)
 	c_tfidf = tfidf[corpus]
 	
-	num_topics = 64
 	if len(sys.argv) > 1:
 		num_topics = int(sys.argv[1])
 	lsi = models.LsiModel(c_tfidf, id2word=dictionary, num_topics=num_topics)
 	c_lsi = lsi[c_tfidf]
 
-	# if not os.path.exists(index_file):
-	# 	index = similarities.MatrixSimilarity(lsi[corpus])
-	# 	index.save(index_file)
-	# else:
-	# 	index = similarities.MatrixSimilarity.load(index_file)
-
-	index = similarities.MatrixSimilarity(lsi[corpus])
+	if not os.path.exists(index_file):
+		index = similarities.MatrixSimilarity(lsi[corpus], num_features=int(num_topics))
+		index.save(index_file)
+	else:
+		index = similarities.MatrixSimilarity.load(index_file)
 
 	for i in range(len(documents)):
 		doc = documents[i].lower().replace(r'.+(news)', '').split()
@@ -119,16 +129,18 @@ def compute_similarity():
 		recommends.append(r_dict)
 
 	df = pd.DataFrame(recommends)
-	df.to_pickle('recommend.p')
+	df.to_pickle(recommend_file)
 
 def get_similar_articles(_id):
 	
+	logger.info("fetching similar articles..")
+
 	resp_list, resp_dict = [], {}
 
-	if not os.path.exists('recommend.p'):
+	if not os.path.exists(recommend_file):
 		train_model()
 	else:
-		df = pd.read_pickle('recommend.p')
+		df = pd.read_pickle(recommend_file)
 		try:
 			df = df.iloc[_id]
 			
@@ -148,13 +160,32 @@ def get_similar_articles(_id):
 
 		except Exception as e:
 			print(str(e))
+
+		logger.debug(str(resp_dict))
+		logger.info('success' if len(resp_dict) != 0 else 'error')
 	
 	return resp_dict
 
 def train_model():
-	if not os.path.exists('clean_content.csv'):
+	if not os.path.exists(clean_file):
 		fetch_and_parse()
-	compute_similarity()
+	compute_similarity(64)
+
+def retrain_model(num_topics=64, refresh=False, force=False):
+	if os.path.exists(recommend_file):
+		bash_force = ['rm',recommend_file]
+		if refresh:
+			bash_force.extend([dict_file, corpus_file, corpus_index_file, index_file])
+		if force:
+			bash_force.extend([actual_file, clean_file])
+		subprocess.call(bash_force)
+	
+	if force:
+		fetch_and_parse()
+
+	compute_similarity(num_topics)	
+
+	return os.path.exists(recommend_file)
 
 if __name__== '__main__':
 	train_model()
