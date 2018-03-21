@@ -1,7 +1,7 @@
 import dao, json, re, spacy, os
 import pandas as pd
 from gensim import corpora, models, similarities
-import sys, subprocess, gc
+import sys, subprocess, gc, numpy
 
 import logging
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
@@ -18,7 +18,7 @@ index_file = 'matrix_similarity.index'
 def fetch_and_parse():
 	return lemmatize(clean(dao.get_dataset()))
 
-def clean(d_set):
+def clean(d_set, save=True):
 	actual_set, parsed_dict = [], {}
 	
 	for row in d_set:
@@ -38,8 +38,9 @@ def clean(d_set):
 			parsed_dict[_id] = re.sub('[\:\n\r\t\.</>;]+','', _text)
 
 		# save actual article content
-		df = pd.DataFrame(actual_set)
-		df.to_csv(actual_file)
+		if save:
+			df = pd.DataFrame(actual_set)
+			df.to_csv(actual_file)
 
 	logger.info("cleansing..%s", (len(parsed_dict) != 0))
 
@@ -165,6 +166,47 @@ def get_similar_articles(_id):
 	
 	return resp_dict
 
+
+def spacy_similarity():
+
+	nlp = spacy.load('en')
+
+	parsed_dset = clean(dao.get_dataset(), False)
+
+	id2index, index2id, index = {}, {}, 1
+	for key in parsed_dset:
+		id2index[key] = index
+		index2id[index] = key
+		parsed_dset[key] = nlp(parsed_dset[key])
+		index += 1
+
+	size, index = len(parsed_dset)+1, 1
+	sim_matrix = numpy.zeros(shape=(size, size))
+	for _id in parsed_dset:
+		sim_matrix[0][index] = _id
+		sim_matrix[index][0] = _id
+		index += 1
+
+	sim_dict = []
+	for col in parsed_dset:
+		row_dict = {}
+		i = id2index[int(col)]
+		for row in parsed_dset:
+			j = id2index[int(row)]
+			sim_matrix[i][j] = -(parsed_dset[int(col)].similarity(parsed_dset[int(row)]))
+
+		row_dict['_id'] = int(col)
+		top = list(sim_matrix[i].argsort())[1:11]
+		row_dict['_top'] = [index2id[k] for k in top]
+		
+		sim_dict.append(row_dict)
+
+	df = pd.DataFrame(sim_dict)
+	df.reindex(columns=['_id'])
+	print(df)
+	# df.to_pickle('spacy_recommend.p')
+
+
 def train_model():
 	if not os.path.exists(clean_file):
 		fetch_and_parse()
@@ -187,5 +229,5 @@ def retrain_model(num_topics=64, refresh=False, force=False):
 	return os.path.exists(recommend_file)
 
 if __name__== '__main__':
-	train_model()
+	spacy_similarity()
 
